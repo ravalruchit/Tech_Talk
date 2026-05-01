@@ -1,0 +1,14 @@
+# Recordings — too large for git
+recordings/*.webm
+recordings/*.mp4
+
+# Node modules
+signaling/node_modules/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
