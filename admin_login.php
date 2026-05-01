@@ -9,7 +9,7 @@ if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
 // Admin login — credentials from environment variables
 // Set ADMIN_EMAIL and ADMIN_PASS in Railway environment settings
 $adminEmail = getenv('ADMIN_EMAIL') ?: 'ruchit@techtalk.com';
-$adminPass  = getenv('ADMIN_PASS')  ?: 'TechTalk@2025!';
+$adminPass  = getenv('ADMIN_PASS')  ?: 'techtalk2025';
 $flash = ['type' => '', 'text' => ''];
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {

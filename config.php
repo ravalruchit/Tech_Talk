@@ -2,14 +2,15 @@
 // ─── Database Configuration ───────────────────────────────────────────────
 // On Railway: set these as environment variables in your service settings.
 // Locally: falls back to XAMPP defaults.
-define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
+// InfinityFree requires the external SQL hostname, not localhost
+define('DB_HOST', getenv('DB_HOST') ?: 'sql305.infinityfree.com');
 define('DB_PORT', getenv('DB_PORT') ?: 3306);
-define('DB_USER', getenv('DB_USER') ?: 'root');
-define('DB_PASS', getenv('DB_PASS') ?: '');
-define('DB_NAME', getenv('DB_NAME') ?: 'tachtalk');
+define('DB_USER', getenv('DB_USER') ?: 'if0_41806582');
+define('DB_PASS', getenv('DB_PASS') ?: 'EWCfPTe8FdJiFxh');
+define('DB_NAME', getenv('DB_NAME') ?: 'if0_41806582_techtalk');
 
 // Create connection
-$conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
+$conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 
 if ($conn->connect_error) {
     // Don't expose DB details in production

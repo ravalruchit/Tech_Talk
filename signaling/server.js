@@ -6,7 +6,15 @@ const cors    = require('cors');
 const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: [
+      'https://techtalk.gt.tc',
+      'http://techtalk.gt.tc',
+      'http://localhost',
+      'http://127.0.0.1'
+    ],
+    methods: ['GET', 'POST']
+  },
   pingTimeout: 60000,
   pingInterval: 25000
 });
@@ -14,8 +22,10 @@ const io     = new Server(server, {
 app.use(cors());
 app.get('/', (req, res) => res.send('TechTalk Signaling Server Running'));
 
-// rooms[roomId] = { sockets: [socketId, ...] }
+// rooms[roomId] = [socketId, ...]
 const rooms = {};
+// Mutex to prevent race conditions
+const roomLocks = {};
 
 function getRoomSockets(roomId) {
   return rooms[roomId] ? rooms[roomId].filter(id => io.sockets.sockets.has(id)) : [];
@@ -25,34 +35,42 @@ io.on('connection', socket => {
   console.log('User connected:', socket.id);
 
   socket.on('join-room', ({ roomId, userName }) => {
-    // Clean up stale socket IDs first
-    if (rooms[roomId]) {
-      rooms[roomId] = getRoomSockets(roomId);
-    } else {
-      rooms[roomId] = [];
-    }
-
-    // If this socket is already in the room (reconnect), remove old entry
-    rooms[roomId] = rooms[roomId].filter(id => id !== socket.id);
-
-    if (rooms[roomId].length >= 2) {
-      socket.emit('room-full');
-      console.log(`Room ${roomId} is full, rejecting ${userName}`);
+    // Prevent race condition with simple lock
+    if (roomLocks[roomId]) {
+      setTimeout(() => socket.emit('join-room', { roomId, userName }), 100);
       return;
     }
+    roomLocks[roomId] = true;
 
-    rooms[roomId].push(socket.id);
-    socket.join(roomId);
-    socket.roomId   = roomId;
-    socket.userName = userName;
+    try {
+      // Clean up stale socket IDs
+      rooms[roomId] = getRoomSockets(roomId);
 
-    const isInitiator = rooms[roomId].length === 1;
-    console.log(`${userName} joined room ${roomId} — isInitiator: ${isInitiator}, total: ${rooms[roomId].length}`);
+      // Remove this socket if already in room (reconnect)
+      rooms[roomId] = rooms[roomId].filter(id => id !== socket.id);
 
-    socket.emit('room-joined', { roomId, isInitiator, peerCount: rooms[roomId].length });
+      if (rooms[roomId].length >= 2) {
+        socket.emit('room-full');
+        console.log(`Room ${roomId} is full, rejecting ${userName}`);
+        return;
+      }
 
-    // Notify the other person
-    socket.to(roomId).emit('peer-joined', { userName, socketId: socket.id });
+      rooms[roomId].push(socket.id);
+      socket.join(roomId);
+      socket.roomId   = roomId;
+      socket.userName = userName;
+
+      const isInitiator = rooms[roomId].length === 1;
+      console.log(`${userName} joined room ${roomId} — isInitiator: ${isInitiator}, total: ${rooms[roomId].length}`);
+
+      socket.emit('room-joined', { roomId, isInitiator, peerCount: rooms[roomId].length });
+
+      // Notify the other person
+      socket.to(roomId).emit('peer-joined', { userName, socketId: socket.id });
+    } finally {
+      // Always release lock
+      delete roomLocks[roomId];
+    }
   });
 
   socket.on('offer', ({ roomId, offer }) => {

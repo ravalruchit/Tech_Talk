@@ -330,13 +330,8 @@ $room_id = 'techtalk-session-' . $session_id;
     document.body.appendChild(banner);
   }
 
-  // Signaling server URL:
-  // - On Railway: set SIGNAL_SERVER_URL environment variable to your Node service URL
-  // - Locally: auto-detects localhost
-  const SIGNAL_SERVER = '<?= getenv("SIGNAL_SERVER_URL") ?: "" ?>'
-    || (window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : 'https://' + window.location.hostname.replace(/^[^.]+/, 'signal'));
+  // Signaling server URL
+  const SIGNAL_SERVER = '<?= getenv("SIGNAL_SERVER_URL") ?: "https://techtalk-signal.onrender.com" ?>';
 
   // Load socket.io then start the call
   const s = document.createElement('script');
@@ -375,7 +370,23 @@ let reportSubmitted = false; // ✅ Only upload recording if a report was filed
 const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ]
 };
 
@@ -485,21 +496,33 @@ function connectSocket() {
     console.log('Received offer');
     try {
       if (!peerConnection) createPeerConnection();
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      // Use plain object — RTCSessionDescription constructor is deprecated
+      await peerConnection.setRemoteDescription(offer);
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       socket.emit('answer', { roomId: ROOM_ID, answer });
       console.log('Answer sent');
     } catch (err) {
       console.error('Error handling offer:', err);
+      // Retry once after short delay
+      setTimeout(async () => {
+        try {
+          if (peerConnection && peerConnection.signalingState !== 'closed') {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', { roomId: ROOM_ID, answer });
+          }
+        } catch(e) { console.error('Retry failed:', e); }
+      }, 1000);
     }
   });
 
   socket.on('answer', async ({ answer }) => {
     console.log('Received answer');
     try {
-      if (peerConnection) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      if (peerConnection && peerConnection.signalingState !== 'closed') {
+        // Use plain object — RTCSessionDescription constructor is deprecated
+        await peerConnection.setRemoteDescription(answer);
       }
     } catch (err) {
       console.error('Error handling answer:', err);
@@ -568,6 +591,16 @@ function createPeerConnection() {
     if (peerConnection.iceConnectionState === 'failed') {
       showToast('⚠️ Connection failed. Retrying...');
       peerConnection.restartIce();
+      // Re-send offer after ICE restart if we are initiator
+      if (isInitiator) {
+        setTimeout(async () => {
+          try {
+            const offer = await peerConnection.createOffer({ iceRestart: true });
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', { roomId: ROOM_ID, offer });
+          } catch(e) { console.error('ICE restart offer failed:', e); }
+        }, 500);
+      }
     }
     if (peerConnection.iceConnectionState === 'disconnected') {
       showToast('⚠️ Connection lost. Waiting to reconnect...');
@@ -684,7 +717,10 @@ function uploadRecordingThenRedirect() {
   formData.append('recorder_id', ME_ID);
 
   fetch('save_recording.php', { method: 'POST', body: formData })
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(data => {
       console.log('Recording result:', data);
       if (data.success) {
@@ -695,7 +731,6 @@ function uploadRecordingThenRedirect() {
     })
     .catch(err => console.error('Upload error:', err))
     .finally(() => {
-      // Always redirect after 1 second whether upload succeeded or not
       setTimeout(() => { window.location.href = 'sessions.php'; }, 1000);
     });
 }
@@ -754,6 +789,7 @@ function startRecording() {
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
+    document.getElementById('recIndicator').style.display = 'none';
   }
 }
 
